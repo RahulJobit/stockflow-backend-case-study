@@ -1,0 +1,138 @@
+Part 1: Issues Identified
+No input validation → API may crash if fields missing
+No SKU uniqueness check → duplicate products possible
+Two separate commits → data inconsistency risk
+Product wrongly linked to one warehouse
+No error handling
+Price not validated
+No HTTP status codes
+Part 1: Fixed Code
+@app.route('/api/products', methods=['POST'])
+def create_product():
+    data = request.json
+
+    if not data.get('name') or not data.get('sku'):
+        return {"error": "Missing required fields"}, 400
+
+    existing = Product.query.filter_by(sku=data['sku']).first()
+    if existing:
+        return {"error": "SKU already exists"}, 400
+
+    try:
+        product = Product(
+            name=data['name'],
+            sku=data['sku'],
+            price=float(data['price'])
+        )
+
+        db.session.add(product)
+        db.session.flush()
+
+        inventory = Inventory(
+            product_id=product.id,
+            warehouse_id=data['warehouse_id'],
+            quantity=data.get('initial_quantity', 0)
+        )
+
+        db.session.add(inventory)
+        db.session.commit()
+
+        return {"message": "Product created", "product_id": product.id}, 201
+
+    except Exception:
+        db.session.rollback()
+        return {"error": "Something went wrong"}, 500
+
+
+PART 2 - TABLE DESIGN
+
+ Database Schema
+Companies
+id (PK)
+name
+Warehouses
+id (PK)
+company_id (FK)
+name
+Products
+id (PK)
+name
+sku (UNIQUE)
+price
+Inventory
+id (PK)
+product_id (FK)
+warehouse_id (FK)
+quantity
+Suppliers
+id (PK)
+name
+contact_email
+Product_Suppliers
+product_id (FK)
+supplier_id (FK)
+Inventory_Logs
+id
+product_id
+warehouse_id
+change
+timestamp
+
+Missing Requirements 
+What defines low stock?
+Can a product have multiple suppliers?
+What is “recent sales”?
+Can stock go negative?
+
+Design Explanation
+SKU is unique → avoids duplication
+Inventory separated → supports multiple warehouses
+Logs table → track stock changes  
+
+PART 3 - Logic 
+@app.route('/api/companies/<int:company_id>/alerts/low-stock', methods=['GET'])
+def low_stock_alerts(company_id):
+
+    alerts = []
+
+    warehouses = Warehouse.query.filter_by(company_id=company_id).all()
+
+    for warehouse in warehouses:
+        inventory_items = Inventory.query.filter_by(warehouse_id=warehouse.id).all()
+
+        for item in inventory_items:
+            product = Product.query.get(item.product_id)
+
+            threshold = getattr(product, 'low_stock_threshold', 10)
+
+            if item.quantity < threshold:
+
+                alerts.append({
+                    "product_id": product.id,
+                    "product_name": product.name,
+                    "sku": product.sku,
+                    "warehouse_id": warehouse.id,
+                    "warehouse_name": warehouse.name,
+                    "current_stock": item.quantity,
+                    "threshold": threshold,
+                    "days_until_stockout": 10,  # assumed
+                    "supplier": {
+                        "id": 1,
+                        "name": "Default Supplier",
+                        "contact_email": "supplier@email.com"
+                    }
+                })
+
+    return {
+        "alerts": alerts,
+        "total_alerts": len(alerts)
+    }
+
+
+Assumptions
+Default threshold = 10
+Dummy supplier used
+Stockout days estimated
+
+                                           THANK YOU
+
